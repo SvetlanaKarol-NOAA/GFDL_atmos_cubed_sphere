@@ -186,7 +186,7 @@ contains
 
   subroutine fv_dynamics(npx, npy, npz, nq_tot,  ng, bdt, consv_te, fill,             &
                         reproduce_sum, kappa, cp_air, zvir, ptop, ks, ncnst, n_split, &
-                        q_split, u, v, w, delz, wdens,wzhyd,hydrostatic, pt, delp, q,             &
+                        q_split, u, v, w, delz, hydrostatic, pt, delp, q,             &
                         ps, pe, pk, peln, pkz, phis, q_con, omga, ua, va, uc, vc,     &
                         ak, bk, mfx, mfy, cx, cy, ze0, hybrid_z,                      &
                         gridstruct, flagstruct, neststruct, idiag, bd,                &
@@ -199,7 +199,9 @@ contains
     use CCPP_data,         only: cdata => cdata_tile
     use CCPP_data,         only: GFDL_interstitial
 
-    use molecular_diffusion_mod, only:  molecular_diffusion_run
+    use molecular_diffusion_mod, only: md_tadj_layers,          &
+                                       thermosphere_adjustment, &
+                                       molecular_diffusion_run
 
     real, intent(IN) :: bdt  !< Large time-step
     real, intent(IN) :: consv_te
@@ -224,9 +226,6 @@ contains
     real, intent(inout), dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1,npz) :: u !< D grid zonal wind (m/s)
     real, intent(inout), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz) :: v !< D grid meridional wind (m/s)
     real, intent(inout) :: w(   bd%isd:  ,bd%jsd:  ,1:) !<  W (m/s)
-    real, intent(inout) :: wdens( bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz) ! wam air density kg/m3
-    real, intent(inout) :: wzhyd( bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz) ! hydrostatic height geop/grav 
-   
     real, intent(inout) :: pt(  bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)  !< temperature (K)
     real, intent(inout) :: delp(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)  !< pressure thickness (pascal)
     real, intent(inout) :: q(   bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz, ncnst) !< specific humidity and constituents
@@ -309,11 +308,11 @@ contains
       type(group_halo_update_type), save :: i_pack(max_packs)
       integer :: is,  ie,  js,  je
       integer :: isd, ied, jsd, jed
-      real    :: dt2, cv_air, wdenshyd
+      real    :: dt2, cv_air
       integer :: ierr
       real :: time_total
       integer :: seconds, days
-      real    :: wzkhyd, wzmhyd, rdg_dpdz
+      
       real, dimension(:,:,:), pointer :: cappa
       real, dimension(:,:,:), pointer :: dp1
       real, dimension(:,:,:), pointer :: dtdt_m
@@ -322,9 +321,20 @@ contains
       cappa => GFDL_interstitial%cappa
       dp1 => GFDL_interstitial%te0
       dtdt_m => GFDL_interstitial%dtdt
-      te_2d => GFDL_interstitial%te0_2d     
+      te_2d => GFDL_interstitial%te0_2d
 
-  
+      
+      
+      
+      
+      
+      
+      
+!      ccpp_associate: associate( cappa     => GFDL_interstitial%cappa,     &
+!                                 dp1       => GFDL_interstitial%te0,       &
+!                                 dtdt_m    => GFDL_interstitial%dtdt,      &
+!                                 last_step => GFDL_interstitial%last_step, &
+!                                 te_2d     => GFDL_interstitial%te0_2d     )
 
       is  = bd%is
       ie  = bd%ie
@@ -346,7 +356,7 @@ contains
 
       grav_var_h = grav
       grav_var = grav
-      rdg_dpdz = -rdgas/grav
+
       if(flagstruct%var_grav)then
         do j=js,je
           do i=is,ie
@@ -355,7 +365,7 @@ contains
             do k=npz,1,-1
               newrad(i,j,k) = newrad(i,j,k+1) - delz(i,j,k)
               grav_var_h(i,j,k) = grav*((radius**2)/(newrad(i,j,k)**2))
-              grav_var(i,j,k) = .5*(grav_var_h(i,j,k+1)+grav_var_h(i,j,k))
+              grav_var(i,j,k) = (grav_var_h(i,j,k+1)+grav_var_h(i,j,k))/2.
               rdg(i,j,k) = -rdgas/grav_var(i,j,k)
             enddo
           enddo
@@ -672,7 +682,7 @@ contains
   endif
 #endif
 
-  GFDL_interstitial% last_step = .false.
+  GFDL_interstitial%last_step = .false.
   mdt = bdt / real(k_split)
 
   if ( idiag%id_mdt > 0 .and. (.not. do_adiabatic_init) ) then
@@ -871,7 +881,7 @@ contains
             do k=npz,1,-1
               newrad(i,j,k) = newrad(i,j,k+1) - delz(i,j,k)
               grav_var_h(i,j,k) = grav*((radius**2)/(newrad(i,j,k)**2))
-              grav_var(i,j,k) = .5*(grav_var_h(i,j,k+1)+grav_var_h(i,j,k))
+              grav_var(i,j,k) = (grav_var_h(i,j,k+1)+grav_var_h(i,j,k))/2.
               rdg(i,j,k) = -rdgas/grav_var(i,j,k)
             enddo
           enddo
@@ -922,7 +932,7 @@ contains
                pkz(i,j,k) = exp( kappa*log(rdg(i,j,k)*delp(i,j,k)*pt(i,j,k)*    &
                             (1.+dp1(i,j,k))/delz(i,j,k)) )
 !			    
-! >>>>Valery:   Rd_multi = Rdgas*(1.+dp1(i,j,k))=Rdgas*virq(q(i,j,k,:))
+! >>>>  Rd_multi = Rdgas*(1.+dp1(i,j,k))=Rdgas*virq(q(i,j,k,:))
 !
 #endif	   
              enddo
@@ -1049,41 +1059,22 @@ contains
            enddo
          enddo
        enddo
-#ifdef MULTI_GASES
-! ------------------------------------------------------------
-! direct explicit molecular diffusion on the pressure levels
-! ------------------------------------------------------------
+
+! -----------------------------------------------------
+! direct explicit molecular diffusion
+! -----------------------------------------------------
       if ( flagstruct%molecular_diffusion .and. mdt>0) then
         call molecular_diffusion_run(u, v, w, delp, pt, pkz, cappa, q, bd,   &
                  gridstruct, flagstruct, domain, npx, npy, npz, nq, bdt, n_map, akap, zvir, cv_air, ng, delz)
       endif
 ! -------------------------------------------------
-! computing wdens & wzhyd
-!-------------------------------------------------
-#ifdef __GFORTRAN__
-!$OMP parallel do default(none) shared(is,ie,js,je,npz, num_gas, wzmhyd,wzkhyd, q, wdenshyd, wdens, wzhyd, phis, pt, pe, peln,delp, delz, grav_var)
-#else
-!$OMP parallel do default(none) shared(is,ie,js,je,npz, num_gas, wzmhyd,wzkhyd,q, wdenshyd, wdens, wzhyd, phis, pt, pe, peln,delp, delz, grav_var)
-#endif      
-        do j=js,je
-          do i=is,ie     
-	    wzmhyd  = phis(i,j)/grav
-	   do k=npz, 1, -1
-! hydrostatic height 	  wzkhyd > 0 
-	     wzkhyd = wzmhyd + rdgas*virqd(q(i,j,k,1:num_gas))*pt(i,j,k)*(peln(i,k+1,j)-peln(i,k,j))/grav_var(i,j,k)
-	     wzhyd(i,j,k) = .5*(wzkhyd +wzmhyd)
-	     wzmhyd =wzkhyd
-! hydrostatic density 	     
-	     wdenshyd = -delp(i,j,k)/delz(i,j,k)/grav_var(i,j,k)  ! > 0
-! state-law:  wdens =P/(RT)
-	     wdens(i,j,k) = .5*(pe(i,k, j)+pe(i,k+1, j))/pt(i,j,k)/(rdgas*virqd(q(i,j,k,1:num_gas)))
-             wzhyd(i,j,k) = wdenshyd 
-	   enddo 	   
-	  enddo 
-	enddo      
-#endif       
-! -------------------------------------------------
 
+       if ( flagstruct%molecular_diffusion ) then
+! do thermosphere adjustment if it is turned on and at last_step.
+         if( md_tadj_layers .gt.0) then
+           call thermosphere_adjustment(domain,gridstruct,npz,bd,ng,pt)
+         endif ! md_tadj_layers>0 and GFDL_interstitial%last_step
+       endif
      endif ! last_step
 
      if ( flagstruct%fv_debug ) then
@@ -1129,7 +1120,6 @@ contains
 #endif
   enddo    ! n_map loop
                                                   call timing_off('FV_DYN_LOOP')
-						  
 
   if ( idiag%id_mdt > 0 .and. (.not.do_adiabatic_init) ) then
 ! Output temperature tendency due to inline moist physics:
@@ -1358,7 +1348,7 @@ contains
   ! Call CCPP timestep finalize
   call ccpp_physics_timestep_finalize(cdata, suite_name=trim(ccpp_suite), group_name="fast_physics", ierr=ierr)
 
-!!!!!!!  end associate ccpp_associate
+!!!!!!!!!  end associate ccpp_associate
 
   end subroutine fv_dynamics
 

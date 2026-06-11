@@ -1,3 +1,4 @@
+
 !***********************************************************************
 !*                   GNU Lesser General Public License
 !*
@@ -209,7 +210,6 @@ use fv_sg_mod,          only: fv_subgrid_z
 use fv_update_phys_mod, only: fv_update_phys
 use fv_io_mod,          only: fv_io_register_nudge_restart
 use fv_nwp_nudge_mod,   only: fv_nwp_nudge_init, fv_nwp_nudge_end, do_adiabatic_init
-!!! use fv_nwp_nudge_mod,   only: fv3wam_nudge_init, fv3wam_nudge_end
 use fv_regional_mod,    only: start_regional_restart, read_new_bc_data, &
                               a_step, p_step, current_time_in_seconds
 use fv_grid_utils_mod,  only: g_sum
@@ -554,25 +554,14 @@ contains
 
 
    if ( Atm(mygrid)%flagstruct%nudge ) then
-#ifdef MULTI_GASES
-!
-! fv3wam_nudge_init employ specific names for data and extended state-vector for nudging
-!
-!  call fv3wam_nudge_init( Time, Atm(mygrid)%atmos_axes, npz, zvir, Atm(mygrid)%ak, Atm(mygrid)%bk, Atm(mygrid)%ts, &
-!           Atm(mygrid)%phis, Atm(mygrid)%gridstruct, Atm(mygrid)%ks, Atm(mygrid)%npx, Atm(mygrid)%neststruct, Atm(mygrid)%bd)
-#else
       call fv_nwp_nudge_init( Time, Atm(mygrid)%atmos_axes, npz, zvir, Atm(mygrid)%ak, Atm(mygrid)%bk, Atm(mygrid)%ts, &
            Atm(mygrid)%phis, Atm(mygrid)%gridstruct, Atm(mygrid)%ks, Atm(mygrid)%npx, Atm(mygrid)%neststruct, Atm(mygrid)%bd)
-#endif	   
       call mpp_error(NOTE, 'NWP nudging is active')
    endif
    call fv_io_register_nudge_restart ( Atm )
 
    if(.not.allocated(grav_var))then
-     allocate(grav_var(isd:ied,jsd:jed,npz))
-     allocate(grav_var_h(isd:ied,jsd:jed,npz+1))
-     grav_var(:,:,:) = grav
-     grav_var_h(:,:,:) = grav
+     allocate(grav_var(isd:ied,jsd:jed,npz),grav_var_h(isd:ied,jsd:jed,npz+1))
    endif
 
    if ( Atm(mygrid)%flagstruct%na_init>0 ) then
@@ -707,7 +696,6 @@ contains
                       n_split_loc, Atm(n)%flagstruct%q_split,                   &
 !                     Atm(n)%flagstruct%n_split, Atm(n)%flagstruct%q_split,     &
                       Atm(n)%u,    Atm(n)%v,     Atm(n)%w,  Atm(n)%delz,        &
-		      Atm(n)%wdens,    Atm(n)%wzhyd,                            &
                       Atm(n)%flagstruct%hydrostatic,                            &
                       Atm(n)%pt  , Atm(n)%delp,  Atm(n)%q,  Atm(n)%ps,          &
                       Atm(n)%pe,   Atm(n)%pk,    Atm(n)%peln,                   &
@@ -838,12 +826,7 @@ contains
    endif
 
   ! initialize domains for writing global physics data
-  
-#ifdef MULTI_GASES
-!   if ( Atm(mygrid)%flagstruct%nudge ) call fv3wam_nudge_end
-#else  
    if ( Atm(mygrid)%flagstruct%nudge ) call fv_nwp_nudge_end
-#endif  
 
    if (first_diag) then
       call timing_on('FV_DIAG')
@@ -861,8 +844,7 @@ contains
    deallocate (Atm)
 
    deallocate( u_dt, v_dt, t_dt, qv_dt, pref, dum1d )
-   deallocate(grav_var, grav_var_h)
-   
+
  end subroutine atmosphere_end
 
 
@@ -1915,7 +1897,7 @@ contains
 !                     Atm(mygrid)%ptop, Atm(mygrid)%ks, nq, Atm(mygrid)%flagstruct%n_split,        &
                      Atm(mygrid)%ptop, Atm(mygrid)%ks, nq,  n_split_loc,                                       &
                      Atm(mygrid)%flagstruct%q_split, Atm(mygrid)%u, Atm(mygrid)%v, Atm(mygrid)%w,         &
-                     Atm(mygrid)%delz, Atm(mygrid)%wdens, Atm(mygrid)%wzhyd, Atm(mygrid)%flagstruct%hydrostatic,   &
+                     Atm(mygrid)%delz, Atm(mygrid)%flagstruct%hydrostatic,                      &
                      Atm(mygrid)%pt, Atm(mygrid)%delp, Atm(mygrid)%q, Atm(mygrid)%ps,                     &
                      Atm(mygrid)%pe, Atm(mygrid)%pk, Atm(mygrid)%peln, Atm(mygrid)%pkz, Atm(mygrid)%phis,      &
                      Atm(mygrid)%q_con, Atm(mygrid)%omga, Atm(mygrid)%ua, Atm(mygrid)%va, Atm(mygrid)%uc, Atm(mygrid)%vc, &
@@ -1930,7 +1912,7 @@ contains
 !                    Atm(mygrid)%ptop, Atm(mygrid)%ks, nq, Atm(mygrid)%flagstruct%n_split,        &
                      Atm(mygrid)%ptop, Atm(mygrid)%ks, nq, n_split_loc,                                        &
                      Atm(mygrid)%flagstruct%q_split, Atm(mygrid)%u, Atm(mygrid)%v, Atm(mygrid)%w,         &
-                     Atm(mygrid)%delz, Atm(mygrid)%wdens, Atm(mygrid)%wzhyd, Atm(mygrid)%flagstruct%hydrostatic,     &
+                     Atm(mygrid)%delz, Atm(mygrid)%flagstruct%hydrostatic,                      &
                      Atm(mygrid)%pt, Atm(mygrid)%delp, Atm(mygrid)%q, Atm(mygrid)%ps,                     &
                      Atm(mygrid)%pe, Atm(mygrid)%pk, Atm(mygrid)%peln, Atm(mygrid)%pkz, Atm(mygrid)%phis,      &
                      Atm(mygrid)%q_con, Atm(mygrid)%omga, Atm(mygrid)%ua, Atm(mygrid)%va, Atm(mygrid)%uc, Atm(mygrid)%vc, &
@@ -2006,7 +1988,7 @@ contains
                      Atm(mygrid)%flagstruct%fill, Atm(mygrid)%flagstruct%reproduce_sum, kappa, cp_air, zvir,  &
                      Atm(mygrid)%ptop, Atm(mygrid)%ks, nq, Atm(mygrid)%flagstruct%n_split,        &
                      Atm(mygrid)%flagstruct%q_split, Atm(mygrid)%u, Atm(mygrid)%v, Atm(mygrid)%w,         &
-                     Atm(mygrid)%delz, Atm(mygrid)%wdens, Atm(mygrid)%wzhyd, Atm(mygrid)%flagstruct%hydrostatic,     &
+                     Atm(mygrid)%delz, Atm(mygrid)%flagstruct%hydrostatic,                      &
                      Atm(mygrid)%pt, Atm(mygrid)%delp, Atm(mygrid)%q, Atm(mygrid)%ps,                     &
                      Atm(mygrid)%pe, Atm(mygrid)%pk, Atm(mygrid)%peln, Atm(mygrid)%pkz, Atm(mygrid)%phis,      &
                      Atm(mygrid)%q_con, Atm(mygrid)%omga, Atm(mygrid)%ua, Atm(mygrid)%va, Atm(mygrid)%uc, Atm(mygrid)%vc, &
@@ -2020,7 +2002,7 @@ contains
                      Atm(mygrid)%flagstruct%fill, Atm(mygrid)%flagstruct%reproduce_sum, kappa, cp_air, zvir,  &
                      Atm(mygrid)%ptop, Atm(mygrid)%ks, nq, Atm(mygrid)%flagstruct%n_split,        &
                      Atm(mygrid)%flagstruct%q_split, Atm(mygrid)%u, Atm(mygrid)%v, Atm(mygrid)%w,         &
-                     Atm(mygrid)%delz, Atm(mygrid)%wdens, Atm(mygrid)%wzhyd, Atm(mygrid)%flagstruct%hydrostatic,  &
+                     Atm(mygrid)%delz, Atm(mygrid)%flagstruct%hydrostatic,                      &
                      Atm(mygrid)%pt, Atm(mygrid)%delp, Atm(mygrid)%q, Atm(mygrid)%ps,                     &
                      Atm(mygrid)%pe, Atm(mygrid)%pk, Atm(mygrid)%peln, Atm(mygrid)%pkz, Atm(mygrid)%phis,      &
                      Atm(mygrid)%q_con, Atm(mygrid)%omga, Atm(mygrid)%ua, Atm(mygrid)%va, Atm(mygrid)%uc, Atm(mygrid)%vc, &

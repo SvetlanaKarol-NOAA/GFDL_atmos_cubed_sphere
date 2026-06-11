@@ -761,28 +761,13 @@ module fv_arrays_mod
                                   !< cold-start without any topography; this value is ignored for the aquaplanet
                                   !< test_case = 14. The default is .true. It is highly recommended TO NOT ALTER
                                   !< this value unless you know what you are doing.
-
-   integer :: remap_option = 0   !< Whether the vertical remapping is performed on (virtual) temperature 
-                                 !< instead of (virtual) potential temperature. Since typically potential 
-                                 !< temperature increases exponentially from layer to layer near the top 
-                                 !< boundary, the cubic-spline interpolation in the vertical remapping 
+   logical :: remap_t  = .true.  !< Whether the vertical remapping is performed on (virtual) temperature
+                                 !< instead of (virtual) potential temperature. Since typically potential
+                                 !< temperature increases exponentially from layer to layer near the top
+                                 !< boundary, the cubic-spline interpolation in the vertical remapping
                                  !< will have difficulty with the exponential profile. Temperature
                                  !< does not have this problem and will often yield a more accurate result.
-                                 !< WMP-NASA-GMAO UPDATE
-                                 !< The default is 0 , options are:
-                                 !<     0: remap  T in logP
-                                 !<     1: remap PT in P
-                                 !<     2: remap TE in logP with GMAO cubic
-                                 !< kord_tm no longer needs to be negative.
-                                 !< WMP-NASA-GMAO UPDATE
-
-   integer :: gmao_remap = 0    !< Whether the vertical remapping uses GFDl or GMAO remap schemes
-                                !<     0: GFDL schemes
-                                !<     1: GMAO linear
-                                !<     2: GMAO quadratic
-                                !<     3: GMAO cubic
-   logical :: md_subcycle = .false. ! Whether do molecular_diffusion subcycling (WAM)
-
+                                 !< The default is .true.
    logical :: z_tracer = .false.   !< Whether to transport sub-cycled tracers layer-by-layer,
                                    !< each with its own computed sub-cycling time step (if q_split = 0).
                                    !< This may improve efficiency for very large numbers of tracers.
@@ -870,13 +855,13 @@ module fv_arrays_mod
                                           !< If .false., heating from the physics is applied simply as a temperature
                                           !< tendency. The default value is .true.; ignored if hydrostatic = .true.
    logical :: use_hydro_pressure = .false.   !< Whether to compute hydrostatic pressure for input to the physics.
-                                             !< Currently only enabled for the UFS model.
+                                             !< Currently only enabled for the fvGFS model.
                                              !< Ignored in hydrostatic simulations. The default is .false.
    logical :: do_uni_zfull = .false.   !< Whether to compute z_full (the height of each modellayer,
                                        !< as opposed to z_half, the height of each model interface)
                                        !< as the midpoint of the layer, as is done for the nonhydrostatic
                                        !< solver, instead of the height of the location where p = p the mean
-                                       !< pressure in the layer. This option is not available for UFS or
+                                       !< pressure in the layer. This option is not available for fvGFS or
                                        !< the solo_core. The default is .false.
    logical :: hybrid_z    = .false.  !< Whether to use a hybrid-height coordinate, instead of
                                      !< the usual sigma-p coordinate. The default value is .false.
@@ -903,6 +888,8 @@ module fv_arrays_mod
                                            !< The default value is .false.
    logical :: molecular_diffusion = .false.  !< Apply Whole Atmosphere Model (WAM) molecular diffusion
                                              !< developed by Henry Juang
+   logical :: fv3wam_itm          = .false.  !< Apply Whole Atmosphere Model (WAM) divergent damping
+                                             !< 2023/12 by Valery Yudin (NASA/CUA)					     
 
    real :: dz_min = 2        !< Minimum thickness depth to  to enforce monotonicity of height to prevent blowup.
                              !< 2 by default
@@ -941,8 +928,6 @@ module fv_arrays_mod
   integer :: nrows_blend = 0          !< # of blending rows in the outer integration domain.
   logical :: write_restart_with_bcs = .false.   !< Default setting for using DA-updated BC files
   logical :: regional_bcs_from_gsi = .false.    !< Default setting for writing restart files with boundary rows
-  logical :: pass_full_omega_to_physics_in_non_hydrostatic_mode = .false.  !< Default to passing local omega to physics in non-hydrostatic 
-  logical :: var_grav = .false.  ! apply variable gravity (4D) to simulations
 
 
   !>Convenience pointers
@@ -1265,8 +1250,7 @@ module fv_arrays_mod
     real, _ALLOCATABLE ::  delz(:,:,:)  _NULL  !< layer thickness (meters)
     real, _ALLOCATABLE ::   ze0(:,:,:)  _NULL  !< height at layer edges for remapping
     real, _ALLOCATABLE ::  q_con(:,:,:) _NULL  !< total condensates
-    real, _ALLOCATABLE :: wdens(:,:,:)  _NULL  !< cell center WAM air density (kg/m3)
-    real, _ALLOCATABLE :: wzhyd(:,:,:)  _NULL  !< cell center WAM hydro-height var MW/Grav (meter)    
+
 !-----------------------------------------------------------------------
 ! Auxilliary pressure arrays:
 ! The 5 vars below can be re-computed from delp and ptop.
@@ -1319,11 +1303,6 @@ module fv_arrays_mod
     integer, pointer :: npx, npy, npz, ncnst, ng
 
      integer, allocatable, dimension(:) :: pelist
-
-    ! These are set in fv_control_init() and used in fill_nested_grid_cpl()
-    ! to replace numerous p2p MPI transfers with a single mpp_broadcast()
-    integer, allocatable :: Bcast_ranks(:)
-    logical :: BcastMember
 
      type(fv_grid_bounds_type) :: bd
 
@@ -1528,10 +1507,6 @@ contains
     allocate ( Atm%ts(is:ie,js:je) )
     allocate ( Atm%phis(isd:ied  ,jsd:jed  ) )
     allocate ( Atm%omga(isd:ied  ,jsd:jed  ,npz) ); Atm%omga=0.
-! WAM density/zh    
-    allocate ( Atm%wdens(isd:ied  ,jsd:jed  ,npz) )    
-    allocate ( Atm%wzhyd(isd:ied  ,jsd:jed  ,npz) ) 
-      
     allocate (   Atm%ua(isd:ied  ,jsd:jed  ,npz) )
     allocate (   Atm%va(isd:ied  ,jsd:jed  ,npz) )
     allocate (   Atm%uc(isd:ied+1,jsd:jed  ,npz) )
@@ -1586,10 +1561,6 @@ contains
                 Atm%va(i,j,k) = real_big
                 Atm%pt(i,j,k) = real_big
               Atm%delp(i,j,k) = real_big
-	      
-              Atm%wdens(i,j,k) = real_big	      
-              Atm%wzhyd(i,j,k) = real_big
-	      	      
            enddo
         enddo
         do j=jsd, jed+1
@@ -1921,9 +1892,7 @@ contains
     deallocate ( Atm%delz  )
     deallocate ( Atm%ze0   )
     deallocate ( Atm%q_con )
-    
-    deallocate ( Atm%wdens )    
-    deallocate ( Atm%wzhyd )   
+
     deallocate ( Atm%gridstruct% area )   ! Cell Centered
     deallocate ( Atm%gridstruct%rarea )   ! Cell Centered
 
@@ -2096,7 +2065,7 @@ contains
           call deallocate_fv_nest_BC_type(Atm%neststruct%delz_BC)
        endif
 #endif
-       if(allocated(Atm%Bcast_ranks)) deallocate(Atm%Bcast_ranks)
+
     end if
 
     if (Atm%flagstruct%grid_type < 4) then

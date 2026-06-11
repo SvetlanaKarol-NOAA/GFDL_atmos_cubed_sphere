@@ -57,11 +57,8 @@ module tp_core_mod
  private
  public fv_tp_2d, pert_ppm, copy_corners
  public deln_flux_explm, deln_flux_explm_udvd
- public copy_corners_for_udvd 
- 
-!fv3wam-v1: conservation of the viscous energy loss (2-nd order) verticaland horizontal 
-
  public deln_flux_explm_wdis, deln_flux_explm_udvd_dis 
+ public copy_corners_for_udvd
 
  real, parameter:: ppm_fac = 1.5   !< nonlinear scheme limiter: between 1 and 2
  real, parameter:: r3 = 1./3.
@@ -1398,7 +1395,7 @@ endif
 !> nord =  used for extra grid as side
 !------------------
    type(fv_grid_bounds_type), intent(IN) :: bd
-   integer, intent(in):: nord            !< del-n
+   integer, intent(in):: nord            !< del-n 2-nd order
    integer, intent(in):: is,ie,js,je, npx, npy
    real, intent(in):: damp(bd%isd:bd%ied, bd%jsd:bd%jed)
    real, intent(inout):: q(bd%isd:bd%ied, bd%jsd:bd%jed)  ! q ghosted on input
@@ -1408,7 +1405,7 @@ endif
    real xv(bd%isd:bd%ied,bd%jsd:bd%jed)
    real d2(bd%isd:bd%ied,bd%jsd:bd%jed)
    integer i, j, m, n, nt, i1, i2, j1, j2
-
+   
 #ifdef USE_SG
    real, pointer, dimension(:,:)   :: dx, dy, rdxc, rdyc
    real, pointer, dimension(:,:,:) :: sin_sg
@@ -1419,7 +1416,7 @@ endif
    rdyc     => gridstruct%rdyc
    sin_sg   => gridstruct%sin_sg
 #endif
-
+   
    i1 = is-1-nord;    i2 = ie+1+nord
    j1 = js-1-nord;    j2 = je+1+nord
 
@@ -1432,12 +1429,14 @@ endif
 
 ! explicit scheme
 ! for dadx * dy
+ if( nord>0 ) then
    call copy_corners(d2, npx, npy, 1, gridstruct%nested, bd, &
                      gridstruct%sw_corner, gridstruct%se_corner, &
                      gridstruct%nw_corner, gridstruct%ne_corner)
    call copy_corners(xv, npx, npy, 1, gridstruct%nested, bd, &
                      gridstruct%sw_corner, gridstruct%se_corner, &
                      gridstruct%nw_corner, gridstruct%ne_corner)
+ endif		     
 !
    do j=j1,j2
       do i=i1+1,i2
@@ -1449,13 +1448,15 @@ endif
          fx2(i,j) = 0.5*(xv(i-1,j)+xv(i,j))*fx2(i,j)
       enddo
    enddo
-! for dady * dx
+! for dady * dx 
+ if( nord>0 ) then
    call copy_corners(d2, npx, npy, 2, gridstruct%nested, bd, &
                      gridstruct%sw_corner, gridstruct%se_corner, &
                      gridstruct%nw_corner, gridstruct%ne_corner)
    call copy_corners(xv, npx, npy, 2, gridstruct%nested, bd, &
                      gridstruct%sw_corner, gridstruct%se_corner, &
                      gridstruct%nw_corner, gridstruct%ne_corner)
+ endif		     
 !
    do i=i1,i2
       do j=j1+1,j2
@@ -1539,12 +1540,15 @@ endif
 ! explicit scheme
 
 !
+ if( nord>0 ) then
    call copy_corners_for_udvd(d1,d2, npx, npy, 1, gridstruct%nested, bd,  &
                               gridstruct%sw_corner, gridstruct%se_corner, &
                               gridstruct%nw_corner, gridstruct%ne_corner)
    call copy_corners(x5, npx, npy, 1, gridstruct%nested, bd, &
                      gridstruct%sw_corner, gridstruct%se_corner, &
                      gridstruct%nw_corner, gridstruct%ne_corner)
+ endif
+ 		     
    do j=bd%jsd+1,bd%jed
       do i=bd%isd+1,bd%ied
          x6(i,j) = 0.25*(x5(i,j)+x5(i,j-1)+x5(i-1,j)+x5(i-1,j-1))
@@ -1574,12 +1578,15 @@ endif
       enddo
    enddo
 !
+ if( nord>0 ) then
    call copy_corners_for_udvd(d1,d2, npx, npy, 2, gridstruct%nested, bd,  &
                               gridstruct%sw_corner, gridstruct%se_corner, &
                               gridstruct%nw_corner, gridstruct%ne_corner)
    call copy_corners(x5, npx, npy, 2, gridstruct%nested, bd, &
                      gridstruct%sw_corner, gridstruct%se_corner, &
                      gridstruct%nw_corner, gridstruct%ne_corner)
+ endif
+  		     
    do j=bd%jsd+1,bd%jed
       do i=bd%isd+1,bd%ied
          x6(i,j) = 0.25*(x5(i,j)+x5(i,j-1)+x5(i-1,j)+x5(i-1,j-1))
@@ -1715,12 +1722,8 @@ type(fv_grid_bounds_type), intent(IN) :: bd
  endif
 
  end subroutine copy_corners_for_udvd
-!===========================================
-!
-!FV3WAM-v1 of UFS-SWA: 
-!  2023 Valery Yudin CUA
-! accurate approximation for the u-v-w kinetic energy losses due to 2-nd or visocity
-!
+
+
 !===========================================
  subroutine deln_flux_explm_wdis(nord,is,ie,js,je,npx,npy,damp,q, wdis, gridstruct,bd)
 !> Del-2 time split explicit damping for the cell-mean values (A grid)
@@ -1833,7 +1836,7 @@ type(fv_grid_bounds_type), intent(IN) :: bd
  end subroutine deln_flux_explm_wdis
  
   subroutine deln_flux_explm_udvd_dis(nord,is,ie,js,je,npx,npy,damp,u,v,udis, vdis,gridstruct,bd)
-!> Del-2 time split explicit damping for the cell-edge values (D grid) with losses Ekin: udis, vdis
+!> Del-2 time split explicit damping for the cell-edge values (D grid)
 !------------------
 !> nord =  used for extra grid as side
 !------------------
@@ -2013,7 +2016,6 @@ type(fv_grid_bounds_type), intent(IN) :: bd
 
    return
  end subroutine deln_flux_explm_udvd_dis
-
 
 
 end module tp_core_mod

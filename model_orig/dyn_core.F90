@@ -506,7 +506,7 @@ contains
           do k=1,npz
             do j=jsd,jed
               do i=isd,ied
-                grav_var(i,j,k) = 0.5*(grav_var_h(i,j,k+1)+grav_var_h(i,j,k))
+                grav_var(i,j,k) = (grav_var_h(i,j,k+1)+grav_var_h(i,j,k))/2.
               enddo
             enddo
           enddo
@@ -514,8 +514,7 @@ contains
           do k=1,npz
             do j=js,je
               do i=is,ie
-                rdg(i,j,k) = -rdgas / grav_var(i,j,k)    !multi-gases rdgas*virvirq(q(i,j,k,1:num_gas))
-!		cappa(i,j,k) = rdgas / ( rdgas + cvm(i)/virq(q(i,j,k,1:num_gas)) )
+                rdg(i,j,k) = -rdgas / grav_var(i,j,k)
               enddo
             enddo
           enddo

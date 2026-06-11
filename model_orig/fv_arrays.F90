@@ -1265,8 +1265,7 @@ module fv_arrays_mod
     real, _ALLOCATABLE ::  delz(:,:,:)  _NULL  !< layer thickness (meters)
     real, _ALLOCATABLE ::   ze0(:,:,:)  _NULL  !< height at layer edges for remapping
     real, _ALLOCATABLE ::  q_con(:,:,:) _NULL  !< total condensates
-    real, _ALLOCATABLE :: wdens(:,:,:)  _NULL  !< cell center WAM air density (kg/m3)
-    real, _ALLOCATABLE :: wzhyd(:,:,:)  _NULL  !< cell center WAM hydro-height var MW/Grav (meter)    
+
 !-----------------------------------------------------------------------
 ! Auxilliary pressure arrays:
 ! The 5 vars below can be re-computed from delp and ptop.
@@ -1528,10 +1527,7 @@ contains
     allocate ( Atm%ts(is:ie,js:je) )
     allocate ( Atm%phis(isd:ied  ,jsd:jed  ) )
     allocate ( Atm%omga(isd:ied  ,jsd:jed  ,npz) ); Atm%omga=0.
-! WAM density/zh    
-    allocate ( Atm%wdens(isd:ied  ,jsd:jed  ,npz) )    
-    allocate ( Atm%wzhyd(isd:ied  ,jsd:jed  ,npz) ) 
-      
+
     allocate (   Atm%ua(isd:ied  ,jsd:jed  ,npz) )
     allocate (   Atm%va(isd:ied  ,jsd:jed  ,npz) )
     allocate (   Atm%uc(isd:ied+1,jsd:jed  ,npz) )
@@ -1586,10 +1582,6 @@ contains
                 Atm%va(i,j,k) = real_big
                 Atm%pt(i,j,k) = real_big
               Atm%delp(i,j,k) = real_big
-	      
-              Atm%wdens(i,j,k) = real_big	      
-              Atm%wzhyd(i,j,k) = real_big
-	      	      
            enddo
         enddo
         do j=jsd, jed+1
@@ -1921,9 +1913,7 @@ contains
     deallocate ( Atm%delz  )
     deallocate ( Atm%ze0   )
     deallocate ( Atm%q_con )
-    
-    deallocate ( Atm%wdens )    
-    deallocate ( Atm%wzhyd )   
+
     deallocate ( Atm%gridstruct% area )   ! Cell Centered
     deallocate ( Atm%gridstruct%rarea )   ! Cell Centered
 

@@ -96,9 +96,8 @@
 
 
       private
-      public :: c_sw, d_sw, fill_4corners, &
-                del6_vt_flux, divergence_corner, divergence_corner_nest, &
-		sles_tens_shear, edcoef_smag2
+      public :: c_sw, d_sw, d_md, fill_4corners, &
+                del6_vt_flux, divergence_corner, divergence_corner_nest
 
   contains
 
@@ -1578,6 +1577,135 @@
 #endif
 
  end subroutine d_sw
+
+
+! d_md :: D-Grid 2D molecular diffusion
+
+!>@brief The subroutine 'd_md' peforms D-grid molecular diffusion
+   subroutine d_md(p, t,  u,  v, w, q,  &
+                   it, nq, k, km, dt,   &
+                   gridstruct, flagstruct, bd)
+
+      integer, intent(IN):: nq, k, km, it
+      real   , intent(IN):: dt
+      type(fv_grid_bounds_type), intent(IN) :: bd
+      real, intent(INOUT), dimension(bd%isd:bd%ied,  bd%jsd:bd%jed  ):: p, t
+      real, intent(INOUT), dimension(bd%isd:      ,  bd%jsd:        ):: w
+      real, intent(INOUT), dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1):: u
+      real, intent(INOUT), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ):: v
+      real, intent(INOUT):: q(bd%isd:bd%ied,bd%jsd:bd%jed,km,nq)
+      type(fv_grid_type), intent(IN), target :: gridstruct
+      type(fv_flags_type), intent(IN), target :: flagstruct
+!---
+      real, dimension(bd%isd:bd%ied,bd%jsd:bd%jed,1:nq)::  qtra
+      real, dimension(bd%isd:bd%ied,bd%jsd:bd%jed):: temp, plyr
+      real, dimension(bd%isd:bd%ied,bd%jsd:bd%jed):: visc, cond, diff
+
+      real :: coefmax
+      
+      integer :: nord_md2  ! second order molec. diffusion
+      
+      integer :: i, j, iq, n
+      integer :: ijm,idir
+
+      integer :: is,  ie,  js,  je
+      integer :: isd, ied, jsd, jed
+      integer :: npx, npy, nord
+
+      is  = bd%is
+      ie  = bd%ie
+      js  = bd%js
+      je  = bd%je
+      isd = bd%isd
+      ied = bd%ied
+      jsd = bd%jsd
+      jed = bd%jed
+      ijm = (ied-isd+1)*(jed-jsd+1)
+
+      npx      = flagstruct%npx
+      npy      = flagstruct%npy
+      nord     = flagstruct%nord
+!------------------
+!> nord = 0:   del-2
+!> nord = 1:   del-4
+!> nord = 2:   del-6
+!> nord = 3:   del-8 --> requires more ghosting than current
+!------------------      
+      nord_md2=0                ! 
+      
+!
+! prepare molecular diffusion coefficients
+!
+      do j=jsd,jed
+         do i=isd,ied
+            plyr(i,j) = p(i,j)
+            temp(i,j) = t(i,j)
+            qtra(i,j,1:nq) = q(i,j,k,1:nq)
+          enddo
+      enddo
+
+! fill up corner for coefficient computation with values
+      if( flagstruct%nord>0 .and. (.not. (flagstruct%regional))) then
+          idir = mod(it-1,2)+1  ! alternated by 1 and 2 to avoid bias
+          call copy_corners(plyr, npx, npy, idir, gridstruct%nested, bd, &
+                            gridstruct%sw_corner, gridstruct%se_corner, &
+                            gridstruct%nw_corner, gridstruct%ne_corner)
+          call copy_corners(temp, npx, npy, idir, gridstruct%nested, bd, &
+                            gridstruct%sw_corner, gridstruct%se_corner, &
+                            gridstruct%nw_corner, gridstruct%ne_corner)
+          do iq=1,nq
+             call copy_corners(qtra(isd,jsd,iq), npx, npy, idir, &
+                               gridstruct%nested, bd           , &
+                            gridstruct%sw_corner, gridstruct%se_corner, &
+                            gridstruct%nw_corner, gridstruct%ne_corner)
+          enddo
+      endif
+
+      call molecular_diffusion_coefs(ijm,plyr(isd,jsd  ),temp(isd,jsd),&
+                                         qtra(isd,jsd,1),visc(isd,jsd),&
+                                         cond(isd,jsd  ),diff(isd,jsd))
+
+      visc3d(:,:,k) = visc(:,:)
+
+! time scale  and options
+
+      coefmax=0.125*min(gridstruct%da_min,gridstruct%da_min_c)/abs(dt)
+!     if( is_master() ) &
+!        write(*,'(a,i5,5g13.6)') &
+!             ' k coefmax da_c da dx dy',k,coefmax,gridstruct%da_min_c,&
+!           gridstruct%da_min,gridstruct%dx(is,js),gridstruct%dy(is,js)
+
+      do j=jsd,jed
+         do i=isd,ied
+            visc(i,j) = min(coefmax,visc(i,j))*abs(dt)*tau_visc
+            cond(i,j) = min(coefmax,cond(i,j))*abs(dt)*tau_cond
+            diff(i,j) = min(coefmax,diff(i,j))*abs(dt)*tau_diff
+         enddo
+      enddo
+
+!
+! compute diffusion with dimensional split alternatively for implicit
+! explicit diffusion has direct computation not dimensional splitting.
+      idir = mod(it-1,2)+1
+
+! t
+        call deln_flux_explm(nord_md2,is,ie,js,je,npx,npy,cond,t,gridstruct,bd)
+
+! q
+        do iq=1,nq
+          call deln_flux_explm(nord_md2,is,ie,js,je,npx,npy,diff,q(isd,jsd,k,iq),gridstruct,bd)
+        enddo
+
+! u v
+        call deln_flux_explm_udvd(nord_md2,is,ie,js,je,npx,npy,visc, &
+                                     u,v,gridstruct,bd)
+! w
+        call deln_flux_explm(nord_md2,is,ie,js,je,npx,npy,visc,w,gridstruct,bd)
+
+      return
+
+ end subroutine d_md
+
 
 !>@brief The subroutine 'del6_vt_flux' applies 2nd, 4th, or 6th-order damping
 !! to fluxes ("vorticity damping")
@@ -3349,149 +3477,5 @@ end subroutine ytp_v
   end select
 
  end subroutine fill_4corners
-!
-! SLES Horizontal Smag. Tensor witout UA VA call
-!
-!>@brief The subroutine 'sles_tens_shear' computes Smagorinsky damping.
 
- subroutine sles_tens_shear(u, v, smag_c, bd, npx, npy, gridstruct, ng)
- 
-!> Compute the Tension_Shear strain at cell corners for Smagorinsky diffusion
-!!  work only if (grid_type==4) why ????
- 
- type(fv_grid_bounds_type), intent(IN) :: bd
- type(fv_grid_type), intent(IN), target :: gridstruct
- integer, intent(IN) :: npx, npy, ng
- real, intent(in),  dimension(bd%isd:bd%ied,  bd%jsd:bd%jed+1):: u
- real, intent(in),  dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ):: v
-
- real, intent(out), dimension(bd%isd:bd%ied,bd%jsd:bd%jed):: smag_c
- 
- 
-! local
- real:: ut(bd%isd:bd%ied+1,bd%jsd:bd%jed)
- real:: vt(bd%isd:bd%ied,  bd%jsd:bd%jed+1)
- real:: wk(bd%isd:bd%ied,bd%jsd:bd%jed) !<  work array
- real:: sh(bd%isd:bd%ied,bd%jsd:bd%jed)
- integer i,j
- integer is2, ie1
-
- real, pointer, dimension(:,:) :: dxc, dyc, dx, dy, rarea, rarea_c
-
- integer :: is,  ie,  js,  je
- integer :: isd, ied, jsd, jed
-
- is  = bd%is
- ie  = bd%ie
- js  = bd%js
- je  = bd%je
-
- isd  = bd%isd
- ied  = bd%ied
- jsd  = bd%jsd
- jed  = bd%jed
-
- dxc => gridstruct%dxc
- dyc => gridstruct%dyc
- dx  => gridstruct%dx
- dy  => gridstruct%dy
- rarea   => gridstruct%rarea
- rarea_c => gridstruct%rarea_c
-
-  is2 = max(2,is); ie1 = min(npx-1,ie+1)
-
-! Smag = sqrt [ T**2 + S**2 ]:  unit = 1/s
-! where T = du/dx - dv/dy;   S = du/dy + dv/dx
-! Compute tension strain at corners:
-       do j=js,je+1
-          do i=is-1,ie+1
-             ut(i,j) = u(i,j)*dyc(i,j)
-          enddo
-       enddo
-       do j=js-1,je+1
-          do i=is,ie+1
-             vt(i,j) = v(i,j)*dxc(i,j)
-          enddo
-       enddo
-       do j=js,je+1
-          do i=is,ie+1
-             smag_c(i,j) = rarea_c(i,j)*(vt(i,j-1)-vt(i,j)-ut(i-1,j)+ut(i,j))
-          enddo
-       enddo
-! Fix the corners?? if grid_type /= 4
-
-! Compute shear strain:
-       do j=jsd,jed+1
-          do i=isd,ied
-             vt(i,j) = u(i,j)*dx(i,j)
-          enddo
-       enddo
-       do j=jsd,jed
-          do i=isd,ied+1
-             ut(i,j) = v(i,j)*dy(i,j)
-          enddo
-       enddo
-
-       do j=jsd,jed
-          do i=isd,ied
-             wk(i,j) = rarea(i,j)*(vt(i,j)-vt(i,j+1)+ut(i,j)-ut(i+1,j))
-          enddo
-       enddo
-       call a2b_ord4(wk, sh, gridstruct, npx, npy, is, ie, js, je, ng, .false.)
-       do j=js,je+1
-          do i=is,ie+1
-             smag_c(i,j) = sqrt( sh(i,j)**2 + smag_c(i,j)**2 )
-          enddo
-       enddo
-
- end subroutine sles_tens_shear
- 
-!>@brief The subroutine 'edcoef_smag2' compute coefficients for eddy mixing to make stable HR-WAM simulations 
-!
-! NASA/CUA VAY-2024:  New Macro-Eddy Difusion, Viscosity and Heat: edcoef_smag2
-!
- subroutine edcoef_smag2(ng, npx, npy, bd, u,  v, w, edvis, vumol, gridstruct)
-       implicit none
- 
-       type(fv_grid_bounds_type), intent(IN) :: bd 
-       type(fv_grid_type), intent(IN), target :: gridstruct       
-    integer, intent(IN):: npx, npy, ng 
-    
-      real,  parameter :: edvismax  = 1.e8
-      real,  parameter ::    eff_kh = 0.1  
-      real,  parameter :: tensmin2  = 4.e-11
-      real,  parameter :: tensmin2z = 3.e-9  
-                     
-      real, intent(IN), dimension(bd%isd:      ,  bd%jsd:        ):: w
-      real, intent(IN), dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1):: u
-      real, intent(IN), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ):: v
-      real, intent(in), dimension(bd%isd:bd%ied,bd%jsd:bd%jed)  ::  vumol    
-      real, intent(OUT), dimension(bd%isd:bd%ied,bd%jsd:bd%jed) ::  edvis
-!
-      real :: tens(bd%isd:bd%ied,bd%jsd:bd%jed)     !< Smag-tensor strain/shear on sphere   
-      real :: Lhdis2                                ! [2-dx length]^2 or Area of the mesh  
-      real :: ed_kh         
-      integer :: i, j
-      integer :: is,  ie,  js,  je         
-      
-      call sles_tens_shear(u, v, tens, bd, npx, npy, gridstruct, ng) 
-           
-      is  = bd%is
-      ie  = bd%ie
-      js  = bd%js
-      je  = bd%je
-!
-! vertical wind shear Sw =sqrt[(wx^2+wy^2)] can be added for the NH dycores
-! tensb is defined at         [do j=js,je+1 ; do i=is,ie+1 ]
-       do j=js,je+1
-          do i=is,ie+1
-	     Lhdis2=gridstruct%da_min_c * eff_kh        !*max(d2_bg, min(0.20, dddmp*vort(i,j)))  ! del-2
-	     ed_kh = tens(i,j)*Lhdis2                   ! tensor*Lh2
-             ed_kh = min(ed_kh, edvismax)               ! maxval for hor-eddy mixing
-	     edvis(i,j) = max(0.1*vumol(i,j), ed_kh)    ! if ed_kh < 0.1*vumol => add 10% of vumol to keep it stable
-                                                        ! if (ed_kh < 0.1*vumol(i,j) ed_kh =0. 	     
-          enddo
-       enddo      
- end subroutine edcoef_smag2
-! 
  end module sw_core_mod

@@ -72,7 +72,7 @@ module nh_utils_mod
    public Riem_Solver_c
 
    real, parameter:: r3 = 1./3.
-
+   real, parameter:: delzmax = -13500.
    real, allocatable :: rff(:)
    logical :: RFw_initialized = .false.
    integer :: k_rf = 0
@@ -207,7 +207,7 @@ CONTAINS
 !$OMP parallel do default(none) shared(is1,ie1,js1,je1,ws,zs,gz,rdt,km,dz_min)
   do j=js1, je1
      do i=is1, ie1
-        ws(i,j) = ( zs(i,j) - gz(i,j,km+1) ) * rdt
+        ws(i,j) = ( zs(i,j) - gz(i,j,km+1) ) * rdt 
      enddo
      do k=km, 1, -1
         do i=is1, ie1
@@ -353,7 +353,7 @@ CONTAINS
 #endif
                            ptop, hs, w3,  pt, q_con, &
                            delp, gz,  pef,  ws, p_fac, a_imp, scale_m, &
-                           pfull, fast_tau_w_sec, rf_cutoff, grav_var, visc3d)
+                           pfull, fast_tau_w_sec, rf_cutoff, visc3d)
 
    integer, intent(in):: is, ie, js, je, ng, km
    integer, intent(in):: ms
@@ -367,7 +367,6 @@ CONTAINS
    real, intent(in)::   hs(is-ng:ie+ng,js-ng:je+ng)
    real, intent(in), dimension(is-ng:ie+ng,js-ng:je+ng,km):: w3
    real, optional, intent(in), dimension(is-ng:ie+ng,js-ng:je+ng,km):: visc3d
-   real, intent(in), dimension(is-ng:ie+ng,js-ng:je+ng,km):: grav_var
    real, intent(in) :: pfull(km)
 ! OUTPUT PARAMETERS
    real, intent(inout), dimension(is-ng:ie+ng,js-ng:je+ng,km+1):: gz
@@ -378,26 +377,18 @@ CONTAINS
 #ifdef MULTI_GASES
   real, dimension(is-1:ie+1,km  ):: kapad2
 #endif
-  real, dimension(is-ng:ie+ng,js-ng:je+ng,km):: rgrav
-  real gama
+  real gama, rgrav
   real(kind=8) :: rff_temp
   integer i, j, k
   integer is1, ie1
 
     gama = 1./(1.-akap)
+   rgrav = 1./grav
 
    visc(:,:) = 0.0
 
    is1 = is - 1
    ie1 = ie + 1
-
-   do k=1,km
-     do j=js-1,je+1
-       do i=is1,ie1
-         rgrav(i,j,k) = 1./grav_var(i,j,k)
-       enddo
-     enddo
-   enddo
 
    !Set up rayleigh damping
    if (fast_tau_w_sec > 1.e-5 .and. .not. RFw_initialized) then
@@ -413,7 +404,7 @@ CONTAINS
    endif
 
 
-!$OMP parallel do default(none) shared(js,je,is1,ie1,km,delp,pef,ptop,gz,rgrav,grav_var,w3,pt,visc3d,visc, &
+!$OMP parallel do default(none) shared(js,je,is1,ie1,km,delp,pef,ptop,gz,rgrav,w3,pt,visc3d,visc, &
 #ifdef MULTI_GASES
 !$OMP                                  a_imp,dt,gama,akap,ws,p_fac,scale_m,ms,hs,q_con,cappa,kapad,fast_tau_w_sec) &
 !$OMP                          private(cp2,gm2, dm, dz2, w2, pm2, pe2, pem, peg, kapad2)
@@ -424,9 +415,12 @@ CONTAINS
    do 2000 j=js-1, je+1
 
       do k=1,km
+          
          do i=is1, ie1
             dm(i,k) = delp(i,j,k)
-            if(present(visc3d)) visc(i,k) = visc3d(i,j,k)
+!	    if (dm(i,k) <= 0.) print *, ' BS of dm ijk ', i, j, k
+!	    if (dm(i,k) <= 0.) print *, ' BS of dm ',	is1, ie1, js-1, je+1    
+            if(present(visc3d)) visc(i,k) = visc3d(i,j,k)*1.
          enddo
       enddo
 
@@ -451,6 +445,7 @@ CONTAINS
       do k=1,km
          do i=is1, ie1
             dz2(i,k) = gz(i,j,k+1) - gz(i,j,k)
+!vay-dz	    if (dz2(i,k) < delzmax) dz2(i,k) = delzmax
 #ifdef USE_COND
             pm2(i,k) = (peg(i,k+1)-peg(i,k))/log(peg(i,k+1)/peg(i,k))
 
@@ -465,7 +460,7 @@ CONTAINS
 #ifdef MULTI_GASES
          kapad2(i,k) = kapad(i,j,k)
 #endif
-             dm(i,k) = dm(i,k)*rgrav(i,j,k)
+             dm(i,k) = dm(i,k) * rgrav
              w2(i,k) = w3(i,j,k)
          enddo
       enddo
@@ -507,7 +502,8 @@ CONTAINS
 
       do k=km,1,-1
          do i=is1, ie1
-            gz(i,j,k) = gz(i,j,k+1) - dz2(i,k)*grav_var(i,j,k)
+!	    if (dz2(i,k) < delzmax) dz2(i,k) = delzmax
+            gz(i,j,k) = gz(i,j,k+1) - dz2(i,k)*grav
          enddo
       enddo
 
@@ -1429,7 +1425,9 @@ CONTAINS
    integer, intent(in):: is, ie, km
    real,    intent(in):: dt, rgas, gama, kappa, p_fac, fast_tau_w_sec
    real, intent(in), dimension(is:ie,km):: dm2, pt2, pm2, gm2, cp2
+   
    real, optional, intent(in) :: visc_in(is:ie,km)
+   
    real, intent(in )::  ws(is:ie)
    real, intent(in ), dimension(is:ie,km+1):: pem
    real, intent(out)::  pe(is:ie,km+1)
@@ -1441,23 +1439,20 @@ CONTAINS
    real, dimension(is:ie,km  ):: aa, bb, dd, w1, g_rat, gam, mdp, mdm, visc
    real, dimension(is:ie,km+1):: pp
    real, dimension(is:ie):: p1, bet
-   real t1g, rdt, capa1
+   real t1g, rdt, capa1, awmax, m4dz, imp_vumol
+   real  wrk1, wrk2, wrk3  
+   real :: znh
 #ifdef MULTI_GASES
    real  gamax, capa1x, t1gx
 #endif
-   integer i, k   
-   real  awmax, m4dz, imp_vumol, wrk1, wrk2, wrk3  
-   real :: znh, zero_visc
+   integer i, k
    
-   awmax =285.                     ! 100 m/s
-   zero_visc =1.                   ! eliminate it in the future by splitting
-   znh =1.                         ! NH-portion of delz, if znh=1  for storm use "hydrostatic" expansion  
-   m4dz = dt*(6.28*0.25/10.e3)**2  ! dw/dt = -Vu*mkz2W  Lz = 40 km
-   
-   
+   znh =0.         ! NH-portion of delz, if znh=1
    mdp = 0.0
    mdm = 0.0
    visc = 0.0
+   awmax = 75.
+   m4dz = dt*(6.28*0.25/10.e3)**2
    if(present(visc_in)) visc = visc_in
 
 #ifdef MOIST_CAPPA
@@ -1471,11 +1466,21 @@ CONTAINS
     do k=1,km
        do i=is, ie
 #ifdef MOIST_CAPPA
-          pe(i,k) = exp(gm2(i,k)*log(-dm2(i,k)/dz2(i,k)*rgas*pt2(i,k))) - pm2(i,k)
-#else
+          wrk1 = -dm2(i,k)/dz2(i,k)
+	  wrk2 = rgas*pt2(i,k)
+	  if (wrk1 <= 0) print *, 'NH-sim1 dm2/dz2 ', k, dz2(i,k), dm2(i,k), i
+	  if (wrk1 <= 0) print *, 'NH max-dm2-is', maxval(dm2(is,1:km)), minval(dm2(is,1:km)), is	
+	  if (wrk1 <= 0) print *, ' max-dm2-ie', maxval(dm2(ie,1:km)), minval(dm2(ie,1:km)), ie		    
+	  if (wrk2 <= 0) print *, 'NH pt2 ', k, pt2(i,k), rgas
+	  
+	  wrk3 = log(wrk1*wrk2) 
+	  pe(i,k) = exp(gm2(i,k)*wrk3 )
+	   pe(i,k) = pe(i,k) - pm2(i,k)
+!          pe(i,k) = exp(gm2(i,k)*log(-dm2(i,k)/dz2(i,k)*rgas*pt2(i,k))) - pm2(i,k)
+#else	 	  
 #ifdef MULTI_GASES
           gamax = 1. / ( 1. - kapad2(i,k) )
-          pe(i,k) = exp(gamax*log(-dm2(i,k)/dz2(i,k)*rgas*pt2(i,k))) - pm2(i,k)
+          pe(i,k) = exp(gamax*log(-dm2(i,k)/dz2(i,k)*rgas*pt2(i,k))) - pm2(i,k)	 	  
 #else
           pe(i,k) = exp(gama*log(-dm2(i,k)/dz2(i,k)*rgas*pt2(i,k))) - pm2(i,k)
 #endif
@@ -1536,14 +1541,15 @@ CONTAINS
     enddo
     do k=2,km-1
        do i=is, ie
-!
-! zero viscous effects in acoustic P'-W solver
-!       
-          mdp(i,k) = zero_visc*4.0*dt*visc(i,k+1)/(dz2(i,k+1)+dz2(i,k))**2
-          mdm(i,k) = zero_visc*4.0*dt*visc(i,k)/((dz2(i,k+1)+dz2(i,k))*(dz2(i,k)+dz2(i,k-1)))
-	  
+          mdp(i,k) = 0.*4.0*dt*visc(i,k+1)/(dz2(i,k+1)+dz2(i,k))**2
+          mdm(i,k) = 0.*4.0*dt*visc(i,k)/((dz2(i,k+1)+dz2(i,k))*(dz2(i,k)+dz2(i,k-1)))
           gam(i,k) = (aa(i,k)+mdm(i,k)*dm2(i,k)) / bet(i)
             bet(i) =  (1.0-mdp(i,k)-mdm(i,k))*dm2(i,k) - (aa(i,k) + aa(i,k+1) + (aa(i,k)+mdp(i,k)*dm2(i,k))*gam(i,k))
+	    if (bet(i) == 0.) then
+	      print *, 'bet-1 ', mdp(i,k), mdm(i,k), dm2(i,k)
+	      print *, 'bet-2 ', aa(i,k),  aa(i,k+1), aa(i,k)+mdp(i,k)*dm2(i,k)
+	      print *, 'bet-3 ', gam(i,k), i, k, bet(i), is, ie
+	    endif
            w2(i,k) = (dm2(i,k)*w1(i,k)+dt*(pp(i,k+1)-pp(i,k))-(aa(i,k)+mdm(i,k)*dm2(i,k))*w2(i,k-1)) / bet(i)
        enddo
     enddo
@@ -1566,26 +1572,18 @@ CONTAINS
     do k=km-1, 1, -1
        do i=is, ie
           w2(i,k) = w2(i,k) - gam(i,k+1)*w2(i,k+1)
-!
-! limiter on the vertical wind awmax for STORM
-!	  
 	  if (abs(w2(i,k)) .ge. awmax ) w2(i,k) = sign(awmax, w2(i,k))
-	  	  
        enddo
     enddo
-    
    if(present(visc_in)) then
-   
-!     do k= 1, 70       ! start of the molec dissipation 70-th layer from the top
-!     do i=is, ie
-!        imp_vumol = 1./(visc(i,k)*m4dz+1.) 
-!        w2(i,k) = w2(i,k) *imp_vumol 
-!     enddo  	
-!     enddo 
-      
+     do k= 1, 70       
+     do i=is, ie
+        imp_vumol = 1./(visc(i,k)*m4dz+1.) 
+        w2(i,k) = w2(i,k) *imp_vumol 
+     enddo  	
+     enddo  
    endif
-   
-!!! Try Rayleigh damping of w
+!!! Try Rayleigh damping of w in WAM  can be a proxy of ION-drag, absent in WAM hydrostatic physics
 !    if (fast_tau_w_sec > 1.e-5) then
 !       !currently not damping to heat
 !       do k=1,k_rf
@@ -1603,17 +1601,26 @@ CONTAINS
           pe(i,k+1) = pe(i,k) + dm2(i,k)*(w2(i,k)-w1(i,k))*rdt
        enddo
     enddo
-
+    
+   if (znh == 0.) then  
+    do k=1,km
+       do i=is, ie
+         pe(i,k+1) = 0.
+       enddo
+    enddo
+   endif   
+        
     do i=is, ie
+           
            p1(i) = ( pe(i,km) + 2.*pe(i,km+1) )*r3
 #ifdef MOIST_CAPPA
-       dz2(i,km) = -dm2(i,km)*rgas*pt2(i,km)*exp((cp2(i,km)-1.)*log(max(p_fac*pm2(i,km),p1(i)+pm2(i,km))))
+       dz2(i,km) = -dm2(i,km)*rgas*pt2(i,km)*exp((cp2(i,km)-1.)*log(max(p_fac*pm2(i,km),p1(i)*znh+pm2(i,km))))
 #else
 #ifdef MULTI_GASES
        capa1x = kapad2(i,km)-1.
        dz2(i,km) = -dm2(i,km)*rgas*pt2(i,km)*exp(capa1x*log(max(p_fac*pm2(i,km),p1(i)*znh+pm2(i,km))))
 #else
-       dz2(i,km) = -dm2(i,km)*rgas*pt2(i,km)*exp(capa1*log(max(p_fac*pm2(i,km),p1(i)+pm2(i,km))))
+       dz2(i,km) = -dm2(i,km)*rgas*pt2(i,km)*exp(capa1*log(max(p_fac*pm2(i,km),p1(i)*znh+pm2(i,km))))
 #endif
 #endif
     enddo
@@ -1622,14 +1629,14 @@ CONTAINS
        do i=is, ie
           p1(i) = (pe(i,k) + bb(i,k)*pe(i,k+1) + g_rat(i,k)*pe(i,k+2))*r3 - g_rat(i,k)*p1(i)
 #ifdef MOIST_CAPPA
-          dz2(i,k) = -dm2(i,k)*rgas*pt2(i,k)*exp((cp2(i,k)-1.)*log(max(p_fac*pm2(i,k),p1(i)+pm2(i,k))))
+          dz2(i,k) = -dm2(i,k)*rgas*pt2(i,k)*exp((cp2(i,k)-1.)*log(max(p_fac*pm2(i,k),p1(i)*znh+pm2(i,k))))
 
 #else
 #ifdef MULTI_GASES
           capa1x = kapad2(i,k)-1.
           dz2(i,k) = -dm2(i,k)*rgas*pt2(i,k)*exp(capa1x*log(max(p_fac*pm2(i,k),p1(i)*znh+pm2(i,k))))
 #else
-          dz2(i,k) = -dm2(i,k)*rgas*pt2(i,k)*exp(capa1*log(max(p_fac*pm2(i,k),p1(i)+pm2(i,k))))
+          dz2(i,k) = -dm2(i,k)*rgas*pt2(i,k)*exp(capa1*log(max(p_fac*pm2(i,k),p1(i)*znh+pm2(i,k))))
 #endif
 #endif
        enddo
@@ -2113,7 +2120,7 @@ CONTAINS
  end subroutine edge_profile_0grad
 
 !TODO LMH 25may18: do not need delz defined on full compute domain; pass appropriate BCs instead
- subroutine nh_bc(ptop, grav_var, kappa, cp, delp, delzBC, pt, phis, &
+ subroutine nh_bc(ptop, grav, kappa, cp, delp, delzBC, pt, phis, &
 #ifdef MULTI_GASES
       q ,    &
 #endif
@@ -2131,7 +2138,7 @@ CONTAINS
       !OUTPUT: gz, pkc, pk3 (optional)
       integer, intent(IN) :: npx, npy, npz
       logical, intent(IN) :: pkc_pertn, computepk3, fullhalo, bounded_domain
-      real, intent(IN) :: ptop, kappa, cp, BC_step, BC_split
+      real, intent(IN) :: ptop, kappa, cp, grav, BC_step, BC_split
       type(fv_grid_bounds_type), intent(IN) :: bd
       real, intent(IN) :: phis(bd%isd:bd%ied,bd%jsd:bd%jed)
       real, intent(IN),  dimension(bd%isd:bd%ied,bd%jsd:bd%jed,npz):: pt, delp
@@ -2145,12 +2152,11 @@ CONTAINS
       real, intent(INOUT),  dimension(bd%isd:bd%ied,bd%jsd:bd%jed,npz):: cappa
 #endif
 #endif
-      real, intent(IN),  dimension(bd%isd:bd%ied,bd%jsd:bd%jed,npz):: grav_var
       real, intent(INOUT), dimension(bd%isd:bd%ied,bd%jsd:bd%jed,npz+1):: gz, pkc, pk3
 
       integer :: i,j,k
       real :: gama !'gamma'
-      real :: ptk, rkap, peln1, rdg
+      real :: ptk, rgrav, rkap, peln1, rdg
 
       integer :: istart, iend
 
@@ -2170,7 +2176,7 @@ CONTAINS
 
       if (is == 1) then
 
-         call nh_BC_k(ptop, grav_var, kappa, cp, delp, delzBC%west_t0, delzBC%west_t1, pt, phis, &
+         call nh_BC_k(ptop, grav, kappa, cp, delp, delzBC%west_t0, delzBC%west_t1, pt, phis, &
 #ifdef MULTI_GASES
       q ,    &
 #endif
@@ -2188,7 +2194,7 @@ CONTAINS
 
       if (ie == npx-1) then
 
-         call nh_BC_k(ptop, grav_var, kappa, cp, delp, delzBC%east_t0, delzBC%east_t1, pt, phis, &
+         call nh_BC_k(ptop, grav, kappa, cp, delp, delzBC%east_t0, delzBC%east_t1, pt, phis, &
 #ifdef MULTI_GASES
       q ,    &
 #endif
@@ -2217,7 +2223,7 @@ CONTAINS
 
       if (js == 1) then
 
-         call nh_BC_k(ptop, grav_var, kappa, cp, delp, delzBC%south_t0, delzBC%south_t1, pt, phis, &
+         call nh_BC_k(ptop, grav, kappa, cp, delp, delzBC%south_t0, delzBC%south_t1, pt, phis, &
 #ifdef MULTI_GASES
       q ,    &
 #endif
@@ -2235,7 +2241,7 @@ CONTAINS
 
       if (je == npy-1) then
 
-         call nh_BC_k(ptop, grav_var, kappa, cp, delp, delzBC%north_t0, delzBC%north_t1, pt, phis, &
+         call nh_BC_k(ptop, grav, kappa, cp, delp, delzBC%north_t0, delzBC%north_t1, pt, phis, &
 #ifdef MULTI_GASES
       q ,    &
 #endif
@@ -2252,7 +2258,7 @@ CONTAINS
 
 end subroutine nh_bc
 
-subroutine nh_BC_k(ptop, grav_var, kappa, cp, delp, delzBC_t0, delzBC_t1, pt, phis, &
+subroutine nh_BC_k(ptop, grav, kappa, cp, delp, delzBC_t0, delzBC_t1, pt, phis, &
 #ifdef MULTI_GASES
       q ,    &
 #endif
@@ -2271,7 +2277,7 @@ subroutine nh_BC_k(ptop, grav_var, kappa, cp, delp, delzBC_t0, delzBC_t1, pt, ph
    real, intent(IN)    :: BC_step, BC_split
 
    logical, intent(IN) :: pkc_pertn, computepk3
-   real, intent(IN) :: ptop, kappa, cp
+   real, intent(IN) :: ptop, kappa, cp, grav
    real, intent(IN) :: phis(isd:ied,jsd:jed)
    real, intent(IN),  dimension(isd:ied,jsd:jed,npz):: pt, delp
 #ifdef MULTI_GASES
@@ -2283,12 +2289,11 @@ subroutine nh_BC_k(ptop, grav_var, kappa, cp, delp, delzBC_t0, delzBC_t1, pt, ph
    real, intent(INOUT),  dimension(isd:ied,jsd:jed,npz):: cappa
 #endif
 #endif
-   real, intent(IN),  dimension(isd:ied,jsd:jed,npz):: grav_var
    real, intent(INOUT), dimension(isd:ied,jsd:jed,npz+1):: gz, pkc, pk3
 
    integer :: i,j,k
    real :: gama !'gamma'
-   real :: ptk, rkap, peln1, denom
+   real :: ptk, rgrav, rkap, peln1, rdg, denom
 
    real, dimension(istart:iend, npz+1, jstart:jend ) :: pe, peln
 #ifdef USE_COND
@@ -2298,26 +2303,19 @@ subroutine nh_BC_k(ptop, grav_var, kappa, cp, delp, delzBC_t0, delzBC_t1, pt, ph
    real, dimension(istart:iend, npz-1) :: g_rat
    real, dimension(istart:iend) :: bet
    real :: pm, delz_int
-   real, dimension(isd:ied,jsd:jed,npz) :: rgrav, rdg
+
 
    real :: pealn, pebln, rpkz
 #ifdef MULTI_GASES
       real gamax
 #endif
+   rgrav = 1./grav
    gama = 1./(1.-kappa)
    ptk = ptop ** kappa
    rkap = 1./kappa
    peln1 = log(ptop)
+   rdg = - rdgas * rgrav
    denom = 1./BC_split
-
-   do k=1,npz
-     do j=jsd,jed
-       do i=isd,ied
-         rgrav(i,j,k) = 1./grav_var(i,j,k)
-         rdg(i,j,k) = -rdgas/grav_var(i,j,k)
-       enddo
-     enddo
-   enddo
 
    do j=jstart,jend
 
@@ -2328,7 +2326,7 @@ subroutine nh_BC_k(ptop, grav_var, kappa, cp, delp, delzBC_t0, delzBC_t1, pt, ph
       do k=npz,1,-1
          do i=istart,iend
             delz_int = (delzBC_t0(i,j,k)*(BC_split-BC_step) + BC_step*delzBC_t1(i,j,k))*denom
-            gz(i,j,k) = gz(i,j,k+1) - delz_int*grav_var(i,j,k)
+            gz(i,j,k) = gz(i,j,k+1) - delz_int*grav
          enddo
       enddo
 
@@ -2359,13 +2357,13 @@ subroutine nh_BC_k(ptop, grav_var, kappa, cp, delp, delzBC_t0, delzBC_t1, pt, ph
 
             !Full p
 #ifdef MOIST_CAPPA
-            pkz(i,k) = exp(1./(1.-cappa(i,j,k))*log(rdg(i,j,k)*delp(i,j,k)/delz_int*pt(i,j,k)))
+            pkz(i,k) = exp(1./(1.-cappa(i,j,k))*log(rdg*delp(i,j,k)/delz_int*pt(i,j,k)))
 #else
 #ifdef MULTI_GASES
                   gamax = gama * (vicpqd(q(i,j,k,:))/vicvqd(q(i,j,k,:)))
-                  pkz(i,k) = exp(gamax*log(-delp(i,j,k)*rgrav(i,j,k)/delz_int*rdgas*pt(i,j,k)))
+                  pkz(i,k) = exp(gamax*log(-delp(i,j,k)*rgrav/delz_int*rdgas*pt(i,j,k)))
 #else
-                  pkz(i,k) = exp(gama*log(-delp(i,j,k)*rgrav(i,j,k)/delz_int*rdgas*pt(i,j,k)))
+                  pkz(i,k) = exp(gama*log(-delp(i,j,k)*rgrav/delz_int*rdgas*pt(i,j,k)))
 #endif
 #endif
             !hydro

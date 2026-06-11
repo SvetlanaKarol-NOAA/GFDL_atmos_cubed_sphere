@@ -110,8 +110,6 @@ module fv_nggps_diags_mod
  logical master
  integer :: id_ua, id_va, id_pt, id_delp, id_pfhy, id_pfnh
  integer :: id_w, id_delz, id_diss, id_ps, id_hs, id_dbz, id_omga
- integer :: id_dens, id_zhyd
- integer :: kstt_dens, kstt_zhyd, kend_dens, kend_zhyd
  integer :: kstt_ua, kstt_va, kstt_pt, kstt_delp, kstt_pfhy
  integer :: kstt_pfnh, kstt_w, kstt_delz, kstt_diss, kstt_ps,kstt_hs
  integer :: kend_ua, kend_va, kend_pt, kend_delp, kend_pfhy
@@ -120,7 +118,6 @@ module fv_nggps_diags_mod
  integer :: kstt_windvect, kend_windvect
  integer :: kstt_o3_ave, kend_o3_ave, kstt_pm25_ave, kend_pm25_ave
  integer :: kstt_no_ave, kend_no_ave, kstt_no2_ave, kend_no2_ave
- 
  integer :: id_wmaxup,id_wmaxdn,kstt_wup, kend_wup,kstt_wdn,kend_wdn
  integer :: id_uhmax03,id_uhmin03,id_uhmax25,id_uhmin25,id_maxvort01
  integer :: id_maxvorthy1,kstt_maxvorthy1,kstt_maxvort01,id_ustm
@@ -308,25 +305,11 @@ contains
        !--- diagnostic output for skeb: dissipation estimate
        id_diss = register_diag_field ( trim(file_name), 'diss_est', axes(1:3), Time,    &
             'dissipation estimate', 'none', missing_value=missing_value, range=skrange )
-       if (id_diss>0) then
+       if (id_delp>0) then
           kstt_diss = nlevs+1; kend_diss = nlevs+npzo
           nlevs = nlevs + npzo
        endif
-!vay       
-!--- diagnostic output for density: air density kg/m3
-        id_dens = register_diag_field ( trim(file_name), 'wdens', axes(1:3), Time,    &
-            'air density', 'none', missing_value=missing_value, range=skrange )
-       if (id_dens>0) then
-          kstt_dens = nlevs+1; kend_dens = nlevs+npzo
-          nlevs = nlevs + npzo
-       endif
-!--- diagnostic output for hydrostat height: height im m
-        id_zhyd = register_diag_field ( trim(file_name), 'wzhyd', axes(1:3), Time,    &
-            'hydro-height', 'none', missing_value=missing_value, range=skrange )
-       if (id_zhyd>0) then
-          kstt_zhyd = nlevs+1; kend_zhyd = nlevs+npzo
-          nlevs = nlevs + npzo
-       endif                   
+
 !--------------------
 ! Tracer diagnostics:
 !--------------------
@@ -593,14 +576,6 @@ contains
 
     !--- TEMPERATURE
     if(id_pt   > 0) call store_data(id_pt, Atm(n)%pt(isco:ieco,jsco:jeco,:), Time, kstt_pt, kend_pt)
-    
-!vay Jul 20 Bug-fixed ......call store_data(id_dens/id_zhyd
-    !--- density
-    if(id_dens   > 0) then
-       call store_data(id_dens, Atm(n)%wdens(isco:ieco,jsco:jeco,:), Time, kstt_dens, kend_dens)
-    endif
-    !--- hydrostatic height
-    if(id_zhyd   > 0) call store_data(id_zhyd, Atm(n)%wzhyd(isco:ieco,jsco:jeco,:), Time, kstt_zhyd, kend_zhyd)
 
     !--- TRACERS
     do itrac=1, ncnsto
@@ -1439,20 +1414,6 @@ contains
           axes(1:3), fcst_grid, kstt_delp,kend_delp, dyn_bundle, output_file, rcd=rc)
      if(rc==0)  num_field_dyn=num_field_dyn+1
    endif
-!
-   if( id_zhyd > 0) then
-     call find_outputname(trim(file_name),'wzhyd',output_name)
-     call add_field_to_bundle(trim(output_name),'hydro-height', 'm', "time: point",   &
-          axes(1:3), fcst_grid, kstt_zhyd,kend_zhyd, dyn_bundle, output_file, rcd=rc)
-     if(rc==0)  num_field_dyn=num_field_dyn+1
-   endif  
-!
-   if( id_dens > 0) then
-     call find_outputname(trim(file_name),'wdens',output_name)
-     call add_field_to_bundle(trim(output_name),'air density', 'kg/m3', "time: point",   &
-          axes(1:3), fcst_grid, kstt_dens,kend_dens, dyn_bundle, output_file, rcd=rc)
-     if(rc==0)  num_field_dyn=num_field_dyn+1
-   endif      
 !
 ! tracers
    do i=1, ncnsto
