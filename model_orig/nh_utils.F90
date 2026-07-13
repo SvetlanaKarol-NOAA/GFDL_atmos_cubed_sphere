@@ -1445,16 +1445,8 @@ CONTAINS
 #ifdef MULTI_GASES
    real  gamax, capa1x, t1gx
 #endif
-   integer i, k   
-   real  awmax, m4dz, imp_vumol, wrk1, wrk2, wrk3  
-   real :: znh, zero_visc
-   
-   awmax =285.                     ! 100 m/s
-   zero_visc =1.                   ! eliminate it in the future by splitting
-   znh =1.                         ! NH-portion of delz, if znh=1  for storm use "hydrostatic" expansion  
-   m4dz = dt*(6.28*0.25/10.e3)**2  ! dw/dt = -Vu*mkz2W  Lz = 40 km
-   
-   
+   integer i, k
+
    mdp = 0.0
    mdm = 0.0
    visc = 0.0
@@ -1536,12 +1528,8 @@ CONTAINS
     enddo
     do k=2,km-1
        do i=is, ie
-!
-! zero viscous effects in acoustic P'-W solver
-!       
-          mdp(i,k) = zero_visc*4.0*dt*visc(i,k+1)/(dz2(i,k+1)+dz2(i,k))**2
-          mdm(i,k) = zero_visc*4.0*dt*visc(i,k)/((dz2(i,k+1)+dz2(i,k))*(dz2(i,k)+dz2(i,k-1)))
-	  
+          mdp(i,k) = 4.0*dt*visc(i,k+1)/(dz2(i,k+1)+dz2(i,k))**2
+          mdm(i,k) = 4.0*dt*visc(i,k)/((dz2(i,k+1)+dz2(i,k))*(dz2(i,k)+dz2(i,k-1)))
           gam(i,k) = (aa(i,k)+mdm(i,k)*dm2(i,k)) / bet(i)
             bet(i) =  (1.0-mdp(i,k)-mdm(i,k))*dm2(i,k) - (aa(i,k) + aa(i,k+1) + (aa(i,k)+mdp(i,k)*dm2(i,k))*gam(i,k))
            w2(i,k) = (dm2(i,k)*w1(i,k)+dt*(pp(i,k+1)-pp(i,k))-(aa(i,k)+mdm(i,k)*dm2(i,k))*w2(i,k-1)) / bet(i)
@@ -1566,34 +1554,18 @@ CONTAINS
     do k=km-1, 1, -1
        do i=is, ie
           w2(i,k) = w2(i,k) - gam(i,k+1)*w2(i,k+1)
-!
-! limiter on the vertical wind awmax for STORM
-!	  
-	  if (abs(w2(i,k)) .ge. awmax ) w2(i,k) = sign(awmax, w2(i,k))
-	  	  
        enddo
     enddo
-    
-   if(present(visc_in)) then
-   
-!     do k= 1, 70       ! start of the molec dissipation 70-th layer from the top
-!     do i=is, ie
-!        imp_vumol = 1./(visc(i,k)*m4dz+1.) 
-!        w2(i,k) = w2(i,k) *imp_vumol 
-!     enddo  	
-!     enddo 
-      
-   endif
-   
+
 !!! Try Rayleigh damping of w
-!    if (fast_tau_w_sec > 1.e-5) then
-!       !currently not damping to heat
-!       do k=1,k_rf
-!          do i=is,ie
-!             w2(i,k) = w2(i,k)*rff(k)
-!          enddo
-!       enddo
-!    endif
+    if (fast_tau_w_sec > 1.e-5) then
+       !currently not damping to heat
+       do k=1,k_rf
+          do i=is,ie
+             w2(i,k) = w2(i,k)*rff(k)
+          enddo
+       enddo
+    endif
 
     do i=is, ie
        pe(i,1) = 0.
@@ -1611,7 +1583,7 @@ CONTAINS
 #else
 #ifdef MULTI_GASES
        capa1x = kapad2(i,km)-1.
-       dz2(i,km) = -dm2(i,km)*rgas*pt2(i,km)*exp(capa1x*log(max(p_fac*pm2(i,km),p1(i)*znh+pm2(i,km))))
+       dz2(i,km) = -dm2(i,km)*rgas*pt2(i,km)*exp(capa1x*log(max(p_fac*pm2(i,km),p1(i)+pm2(i,km))))
 #else
        dz2(i,km) = -dm2(i,km)*rgas*pt2(i,km)*exp(capa1*log(max(p_fac*pm2(i,km),p1(i)+pm2(i,km))))
 #endif
@@ -1627,7 +1599,7 @@ CONTAINS
 #else
 #ifdef MULTI_GASES
           capa1x = kapad2(i,k)-1.
-          dz2(i,k) = -dm2(i,k)*rgas*pt2(i,k)*exp(capa1x*log(max(p_fac*pm2(i,k),p1(i)*znh+pm2(i,k))))
+          dz2(i,k) = -dm2(i,k)*rgas*pt2(i,k)*exp(capa1x*log(max(p_fac*pm2(i,k),p1(i)+pm2(i,k))))
 #else
           dz2(i,k) = -dm2(i,k)*rgas*pt2(i,k)*exp(capa1*log(max(p_fac*pm2(i,k),p1(i)+pm2(i,k))))
 #endif

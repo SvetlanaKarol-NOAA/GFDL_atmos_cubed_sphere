@@ -234,8 +234,8 @@ contains
   logical:: remap_t, remap_pt, remap_te
   integer :: ierr
 
- !     ccpp_associate: associate( fast_mp_consv => GFDL_interstitial%fast_mp_consv, &
- !                                kmp           => GFDL_interstitial%kmp            )
+  !    ccpp_associate: associate( fast_mp_consv => GFDL_interstitial%fast_mp_consv  )
+  !                               kmp           => GFDL_interstitial%kmp            )
 
   remap_t  = .false.
   remap_pt = .false.
@@ -788,8 +788,8 @@ contains
 !$OMP                               do_adiabatic_init,zsum1,zsum0,te0_2d,domain,               &
 !$OMP                               ng,gridstruct,E_Flux,pdt,dtmp,reproduce_sum,q,             &
 !$OMP                               mdt,cld_amt,cappa,dtdt,out_dt,rrg,akap,do_sat_adj,         &
-!$OMP                               kord_tm, pe4,npx,npy, ccn_cm3,   &
-!$OMP                               u_dt,v_dt,c2l_ord,bd,dp0,ps,cdata,GFDL_interstitial,grav_var)       &
+!$OMP                               kord_tm, pe4,npx,npy, ccn_cm3,               &
+!$OMP                               u_dt,v_dt,c2l_ord,bd,dp0,ps,cdata,GFDL_interstitial,grav_var)        &
 !$OMP                        shared(ccpp_suite)                                                &
 #ifdef MULTI_GASES
 !$OMP                        shared(num_gas)                                                   &
@@ -1025,7 +1025,7 @@ endif        ! end last_step check
   endif
 !$OMP end parallel
 
-!!!  end associate ccpp_associate
+!!!!!!!  end associate ccpp_associate
 
  end subroutine Lagrangian_to_Eulerian
 

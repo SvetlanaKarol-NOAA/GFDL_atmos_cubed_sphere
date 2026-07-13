@@ -844,7 +844,8 @@ contains
    deallocate (Atm)
 
    deallocate( u_dt, v_dt, t_dt, qv_dt, pref, dum1d )
-
+   
+   deallocate( grav_var, grav_var_h)
  end subroutine atmosphere_end
 
 

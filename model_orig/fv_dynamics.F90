@@ -199,7 +199,9 @@ contains
     use CCPP_data,         only: cdata => cdata_tile
     use CCPP_data,         only: GFDL_interstitial
 
-    use molecular_diffusion_mod, only:  molecular_diffusion_run
+    use molecular_diffusion_mod, only: md_tadj_layers,          &
+                                       thermosphere_adjustment, &
+                                       molecular_diffusion_run
 
     real, intent(IN) :: bdt  !< Large time-step
     real, intent(IN) :: consv_te
@@ -319,9 +321,20 @@ contains
       cappa => GFDL_interstitial%cappa
       dp1 => GFDL_interstitial%te0
       dtdt_m => GFDL_interstitial%dtdt
-      te_2d => GFDL_interstitial%te0_2d     
+      te_2d => GFDL_interstitial%te0_2d
 
-  
+      
+      
+      
+      
+      
+      
+      
+!      ccpp_associate: associate( cappa     => GFDL_interstitial%cappa,     &
+!                                 dp1       => GFDL_interstitial%te0,       &
+!                                 dtdt_m    => GFDL_interstitial%dtdt,      &
+!                                 last_step => GFDL_interstitial%last_step, &
+!                                 te_2d     => GFDL_interstitial%te0_2d     )
 
       is  = bd%is
       ie  = bd%ie
@@ -352,7 +365,7 @@ contains
             do k=npz,1,-1
               newrad(i,j,k) = newrad(i,j,k+1) - delz(i,j,k)
               grav_var_h(i,j,k) = grav*((radius**2)/(newrad(i,j,k)**2))
-              grav_var(i,j,k) = .5*(grav_var_h(i,j,k+1)+grav_var_h(i,j,k))
+              grav_var(i,j,k) = (grav_var_h(i,j,k+1)+grav_var_h(i,j,k))/2.
               rdg(i,j,k) = -rdgas/grav_var(i,j,k)
             enddo
           enddo
@@ -669,7 +682,7 @@ contains
   endif
 #endif
 
-  GFDL_interstitial% last_step = .false.
+  GFDL_interstitial%last_step = .false.
   mdt = bdt / real(k_split)
 
   if ( idiag%id_mdt > 0 .and. (.not. do_adiabatic_init) ) then
@@ -868,7 +881,7 @@ contains
             do k=npz,1,-1
               newrad(i,j,k) = newrad(i,j,k+1) - delz(i,j,k)
               grav_var_h(i,j,k) = grav*((radius**2)/(newrad(i,j,k)**2))
-              grav_var(i,j,k) = .5*(grav_var_h(i,j,k+1)+grav_var_h(i,j,k))
+              grav_var(i,j,k) = (grav_var_h(i,j,k+1)+grav_var_h(i,j,k))/2.
               rdg(i,j,k) = -rdgas/grav_var(i,j,k)
             enddo
           enddo
@@ -919,7 +932,7 @@ contains
                pkz(i,j,k) = exp( kappa*log(rdg(i,j,k)*delp(i,j,k)*pt(i,j,k)*    &
                             (1.+dp1(i,j,k))/delz(i,j,k)) )
 !			    
-! >>>>Valery:   Rd_multi = Rdgas*(1.+dp1(i,j,k))=Rdgas*virq(q(i,j,k,:))
+! >>>>  Rd_multi = Rdgas*(1.+dp1(i,j,k))=Rdgas*virq(q(i,j,k,:))
 !
 #endif	   
              enddo
@@ -1047,16 +1060,21 @@ contains
          enddo
        enddo
 
-! ------------------------------------------------------------
-! direct explicit molecular diffusion on the pressure levels
-! ------------------------------------------------------------
+! -----------------------------------------------------
+! direct explicit molecular diffusion
+! -----------------------------------------------------
       if ( flagstruct%molecular_diffusion .and. mdt>0) then
         call molecular_diffusion_run(u, v, w, delp, pt, pkz, cappa, q, bd,   &
                  gridstruct, flagstruct, domain, npx, npy, npz, nq, bdt, n_map, akap, zvir, cv_air, ng, delz)
       endif
 ! -------------------------------------------------
 
-
+       if ( flagstruct%molecular_diffusion ) then
+! do thermosphere adjustment if it is turned on and at last_step.
+         if( md_tadj_layers .gt.0) then
+           call thermosphere_adjustment(domain,gridstruct,npz,bd,ng,pt)
+         endif ! md_tadj_layers>0 and GFDL_interstitial%last_step
+       endif
      endif ! last_step
 
      if ( flagstruct%fv_debug ) then
@@ -1102,7 +1120,6 @@ contains
 #endif
   enddo    ! n_map loop
                                                   call timing_off('FV_DYN_LOOP')
-						  
 
   if ( idiag%id_mdt > 0 .and. (.not.do_adiabatic_init) ) then
 ! Output temperature tendency due to inline moist physics:
@@ -1331,7 +1348,7 @@ contains
   ! Call CCPP timestep finalize
   call ccpp_physics_timestep_finalize(cdata, suite_name=trim(ccpp_suite), group_name="fast_physics", ierr=ierr)
 
-!!!!!!!  end associate ccpp_associate
+!!!!!!!!!  end associate ccpp_associate
 
   end subroutine fv_dynamics
 
